@@ -1,3 +1,4 @@
+
 name: Build Android APK
 
 on:
@@ -16,40 +17,84 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Descargar repositorio
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Preparar Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
-      - name: Set up Android SDK
+      - name: Instalar herramientas Android
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK platform and build tools
+      - name: Instalar SDK Android 35
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Set up Gradle 8.9
+      - name: Buscar y descomprimir ZIP del proyecto
+        id: unpack
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP_FILE="$(find . -maxdepth 2 -type f \
+            \( -name 'TIELoteWidget_Source_Audited.zip' \
+            -o -name 'TIELoteWidget_Source.zip' \
+            -o -name 'TIELoteWidget*.zip' \) \
+            -print -quit)"
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "::error::No se encontró el ZIP del código. Súbelo a la raíz del repositorio."
+            exit 1
+          fi
+
+          mkdir -p "$RUNNER_TEMP/tie-project"
+          unzip -o "$ZIP_FILE" -d "$RUNNER_TEMP/tie-project"
+
+          SETTINGS_FILE="$(find "$RUNNER_TEMP/tie-project" \
+            -type f -name 'settings.gradle.kts' -print -quit)"
+
+          if [ -z "$SETTINGS_FILE" ]; then
+            SETTINGS_FILE="$(find "$RUNNER_TEMP/tie-project" \
+              -type f -name 'settings.gradle' -print -quit)"
+          fi
+
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "::error::El ZIP no contiene settings.gradle.kts ni settings.gradle."
+            find "$RUNNER_TEMP/tie-project" -maxdepth 4 -type f
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Proyecto encontrado en: $PROJECT_DIR"
+          ls -la "$PROJECT_DIR"
+
+      - name: Preparar Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+          cache-disabled: true
 
-      - name: Verify Gradle and Java versions
+      - name: Compilar APK
+        shell: bash
         run: |
-          java -version
-          gradle --version
+          set -euo pipefail
+          cd "$PROJECT_DIR"
 
-      - name: Build debug APK
-        run: gradle --no-daemon --stacktrace assembleDebug
+          if [ -f ./gradlew ]; then
+            chmod +x ./gradlew
+            ./gradlew --no-daemon --stacktrace assembleDebug
+          else
+            gradle --no-daemon --stacktrace assembleDebug
+          fi
 
-      - name: Upload APK artifact
+      - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
           name: Mi-TIE-San-Felipe-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
           
